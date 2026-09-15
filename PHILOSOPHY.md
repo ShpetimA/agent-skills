@@ -31,7 +31,7 @@ No skill assumes Hermes, Codex, Claude Code, a specific IDE, a cloud vendor, or 
 
 Effect is treated as an optional architectural context, not as the identity of the collection. The Effect reference applies only where a codebase already uses its services, layers, schemas, typed failures, or testing facilities. The general standards remain useful in TypeScript projects that use no Effect at all.
 
-The PostgreSQL skill follows the same rule. It captures database mechanisms that materially change engineering choices—MVCC, transaction snapshots, locks, vacuum, indexes, and query planning—without prescribing a TypeScript database client or an Effect integration.
+The Effect SQL skill follows the same rule. It standardizes the shared Effect SQL client, schema, query-module, and transaction patterns without treating one database dialect as universal. Database-specific locking, DDL, time, query-planning, and migration behavior remain explicit local decisions.
 
 ## Evolving the collection
 
