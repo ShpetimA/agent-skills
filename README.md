@@ -32,6 +32,7 @@ Use `-g` to install globally. Omit `--agent` to let the CLI detect and prompt fo
 | `code-review` | A review-only workflow that requires concrete evidence and applies the relevant standards. |
 | `tech-spec` | A typed, code-shaped architecture handoff with contracts, seams, call stacks, and a test-first plan. |
 | `improve-codebase-architecture` | A planning-only scan for high-leverage, standards-backed refactor opportunities. |
+| `postgresql` | PostgreSQL-specific guidance for schemas, queries, transactions, indexes, MVCC, vacuum, and production diagnosis. |
 | `grilling` | A one-question-at-a-time design interview. |
 | `grill-me` | An explicit entrypoint for a grilling session. |
 | `grill-with-docs` | A grilling session that also develops ADR and glossary material. |
@@ -49,6 +50,7 @@ skills/
   code-review/
   tech-spec/
   improve-codebase-architecture/
+  postgresql/
   grilling/
   grill-me/
   grill-with-docs/

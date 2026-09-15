@@ -31,6 +31,8 @@ No skill assumes Hermes, Codex, Claude Code, a specific IDE, a cloud vendor, or 
 
 Effect is treated as an optional architectural context, not as the identity of the collection. The Effect reference applies only where a codebase already uses its services, layers, schemas, typed failures, or testing facilities. The general standards remain useful in TypeScript projects that use no Effect at all.
 
+The PostgreSQL skill follows the same rule. It captures database mechanisms that materially change engineering choices—MVCC, transaction snapshots, locks, vacuum, indexes, and query planning—without prescribing a TypeScript database client or an Effect integration.
+
 ## Evolving the collection
 
 Changes should preserve this split: stable, reusable judgment belongs in the standards; concrete operating procedures belong in a workflow skill; specialized detail belongs in a linked reference only when it changes decisions. A new rule should solve a demonstrated recurring problem, not memorialize every edge case from one project.
