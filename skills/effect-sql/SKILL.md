@@ -1,13 +1,11 @@
 ---
 name: effect-sql
-description: Implement or review SQL-backed Effect code using Effect SQL clients, SqlClient, SqlSchema, transactions, and migrations. Use for any supported SQL dialect; load database-specific conventions separately when a task needs them.
+description: Implement or review SQL-backed Effect code using Effect SQL clients, SqlClient, SqlSchema, transactions, and migrations.
 ---
 
-# Effect SQL conventions
+# SQL conventions
 
-Use Effect SQL with a dialect client and handwritten SQL and migrations. Keep SQL beside the behavior that owns it.
-
-The Effect SQL APIs are shared across drivers; preserve the repository's selected client and its dialect. PostgreSQL, MySQL, SQLite, D1, LibSQL, and SQL Server have different DDL, locking, time, conflict, and query-planning semantics. Do not treat SQL that happens to work for one as portable to another.
+Use `@effect/sql` with handwritten SQL and handwritten migrations. Keep SQL beside the behavior that owns it.
 
 ## Query safety
 
@@ -21,19 +19,17 @@ The Effect SQL APIs are shared across drivers; preserve the repository's selecte
 - Keep each `SqlSchema` definition beside the behavior and handwritten SQL it owns. Do not create a
   generic typed-database service or repository around `SqlClient`; `SqlSchema` is the reusable
   schema adapter.
-- Keep stored table and column identifiers in `snake_case` when the repository has not established
-  another SQL convention.
-- When the selected client supports result-name transformation, configure it once at the client
-  layer. Returned row schemas and TypeScript values should use the repository's normal TypeScript
-  casing; do not repeat casing aliases in each query.
+- Keep stored table and column identifiers in `snake_case`.
+- Configure every SQL layer with
+  `transformResultNames: String.snakeToCamel`. Returned row schemas and TypeScript values use
+  `camelCase`; do not repeat casing aliases in each query.
 - Define one Effect Schema against the transformed result shape and return the `SqlSchema` result
   directly. Do not execute into `rows` and manually call `Schema.decodeUnknownEffect` afterward.
 - Add a separate row type or mapper only for a real semantic transformation, never solely to rename
-  stored fields.
+  `snake_case` fields.
 - Brand the projected schema when the decoded value represents authority such as a lease fence.
 - Keep provider and network calls outside authoritative database transactions.
-- Use database time for leases, retry eligibility, and fencing comparisons when the selected
-  database can provide a consistent server-side clock.
+- Use database time for leases, retry eligibility, and fencing comparisons.
 - Encode concurrency invariants in constraints, transactions, locks, and fenced updates.
 
 ## Behavior and query modules
@@ -58,19 +54,17 @@ When a behavior service owns several SQL actions, split it into one service modu
 - Export a row schema or query input type only when another behavior genuinely shares that database
   boundary. Prefer inference from the returned query object otherwise.
 
-## Transactions and locking
+## Transaction locking
 
-- Audit every competing writer before choosing a lock order. When the selected database supports
-  row locking, use one canonical order from the aggregate or root row to its child rows across every
-  code path.
-- Acquire the strongest required lock on first touch. Do not acquire a shared lock and later upgrade
-  the same row to an exclusive lock.
+- Audit every competing writer before choosing a lock order. Use one canonical order from the
+  aggregate or root row to its child rows across every code path.
+- Acquire the strongest required lock on first touch. Do not acquire `for share` and later upgrade
+  the same row to `for update`.
 - Before relying on locks across nested `withTransaction` scopes, verify that the pinned Effect SQL
-  implementation reuses the same connection and implements nesting with the database's supported
-  mechanism, such as savepoints.
-- Prove consequential ordering with a deterministic integration test on the selected database:
-  hold the root lock, start competing writers, verify they have not acquired child locks, release
-  the root lock, and require every writer to complete within a timeout.
+  implementation reuses the same connection and implements nesting with savepoints.
+- Prove consequential ordering with a deterministic SQL integration test: hold the root
+  lock, start competing writers, verify they have not acquired child locks, release the root lock,
+  and require every writer to complete within a timeout.
 
 Before finishing a transaction change, confirm that every competing writer follows the same
 root-to-child order, no path upgrades a shared lock, nested scopes retain connection ownership, and
@@ -78,8 +72,7 @@ the contention test passes without deadlock.
 
 ## Formatting
 
-Apply the repository's SQL formatter when it has one. Otherwise apply these rules to SQL inside
-tagged template literals and migrations:
+Apply these rules to SQL inside tagged template literals and migrations:
 
 - Write SQL keywords and database identifiers in lowercase.
 - Use `snake_case` identifiers.
@@ -98,32 +91,83 @@ tagged template literals and migrations:
 - Keep trailing commas consistent within a query.
 - Omit the final semicolon in tagged template queries; include semicolons in migration files.
 
+```ts
+yield* sql`
+  create table channel_delivery (
+    tenant_id        uuid        not null                                         ,
+    delivery_id      uuid        not null                                         ,
+    status           text        not null                                         ,
+    lease_owner      text            null                                         ,
+    lease_expires_at timestamptz     null                                         ,
+    created_at       timestamptz not null default transaction_timestamp()         ,
+
+    constraint channel_delivery_status_ck
+      check (
+        status in (
+          'pending'      ,
+          'submitted'    ,
+          'delivered'    ,
+          'failed'       ,
+          'suppressed'   ,
+          'cancelled'    ,
+          'indeterminate'
+        )
+      )
+  )
+`;
+```
+
+```ts
+const claimDeliveries = SqlSchema.findAll({
+  Request: ClaimRequest,
+  Result: ClaimedDelivery,
+  execute: ({ batchSize, channelCode, workerId }) => sql`
+    with candidate as (
+      select d.tenant_id       ,
+             d.delivery_id     ,
+             d.lease_generation
+        from channel_delivery d
+       where d.channel_code = ${channelCode}
+         and d.status       = 'pending'
+         and d.available_at <= transaction_timestamp()
+       order
+          by d.available_at ,
+             d.delivery_id
+       for update skip locked
+       limit ${batchSize}
+    )
+    update channel_delivery d
+       set status           = 'leased'                    ,
+           lease_owner      = ${workerId}                 ,
+           lease_generation = d.lease_generation + 1
+      from candidate c
+     where d.tenant_id   = c.tenant_id
+       and d.delivery_id = c.delivery_id
+    returning d.tenant_id       ,
+              d.delivery_id     ,
+              d.lease_generation
+  `,
+});
+```
+
 Before finishing a SQL edit, scan every modified DDL and query block as a rectangular shape.
 Formatting is complete only when related tokens occupy the same visual columns throughout each
 block.
 
-## Scoped data isolation
+## Tenant isolation
 
-Apply these rules to any data model with an ownership or tenant scope:
-
-- Authenticate and authorize before executing scoped behavior.
-- Derive the scope identifier from authenticated authority, never from an unchecked request field.
-- Include the scope identifier in primary keys, unique constraints, foreign keys, joins, lookups,
-  and mutations where the data model requires scope isolation.
-- Keep cross-scope worker or operator operations explicit and separate from scoped operations.
-- Do not depend on connection roles, session variables, or privileged database functions for
-  ordinary application-level scope isolation unless the repository deliberately establishes and
-  verifies that model.
-- Prove that one scope cannot read, mutate, or reference another scope's rows with integration
-  tests against the selected database.
+- Do not use row-level security.
+- Authenticate and authorize before executing tenant-owned behavior.
+- Derive `tenant_id` from authenticated authority, never from an unchecked request field.
+- Include `tenant_id` in tenant-owned primary keys, unique constraints, foreign keys, joins, lookups, and mutations.
+- Keep cross-tenant worker or operator operations explicit and separate from tenant-scoped operations.
+- Do not depend on connection roles, session variables, `set local`, or `security definer` functions for ordinary tenant isolation.
+- Prove that one tenant cannot read, mutate, or reference another tenant's rows with SQL integration tests.
 
 ## Migrations
 
 - Make the schema readable from an empty database.
 - Give every foreign key, unique rule, check, and index a domain reason.
-- Include scope in keys and constraints where the data model requires it.
+- Include tenant scope in keys and constraints where the database plan requires it.
 - Prefer constraints over application-only validation for durable invariants.
-- Add indexes from actual access paths and observed query behavior.
-- Use the selected database's documented migration, transaction, locking, and online-DDL behavior;
-  dialect-specific syntax and rollout constraints do not become portable merely because the Effect
-  SQL client API is shared.
+- Add indexes from actual access paths.
